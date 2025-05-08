@@ -1,0 +1,45 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+
+exporters:
+  debug:
+    verbosity: detailed
+  otlp:
+    endpoint: "{{ .JaegerURL }}"
+    tls:
+      insecure: true
+  prometheusremotewrite:
+    endpoint: "{{ .PrometheusURL }}/api/v1/write"
+    target_info:
+      enabled: true
+    tls:
+      insecure: true
+  {{ if .ColdExtract }}
+  file/logs:
+    path: /data/collector/otel_logs
+    append: true
+  file/metrics:
+    path: /data/collector/otel_metrics
+    append: true
+  file/traces:
+    path: /data/collector/otel_traces
+    append: true
+  {{ end }}
+
+connectors:
+  spanmetrics:
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug, otlp, spanmetrics{{ if .ColdExtract}}, file/traces{{ end }}]
+    metrics:
+      receivers: [otlp, spanmetrics]
+      exporters: [debug, prometheusremotewrite{{ if .ColdExtract}}, file/metrics{{ end }}]
+    logs:
+      receivers: [otlp]
+      exporters: [debug{{ if .ColdExtract}}, file/logs{{ end }}]
