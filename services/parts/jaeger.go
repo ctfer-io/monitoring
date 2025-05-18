@@ -1,6 +1,8 @@
 package parts
 
 import (
+	"strings"
+
 	"github.com/ctfer-io/monitoring/utils"
 	appsv1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/apps/v1"
 	corev1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/core/v1"
@@ -27,6 +29,9 @@ type (
 		// Global attributes
 		Namespace pulumi.StringInput
 
+		Registry pulumi.StringPtrInput
+		registry pulumi.StringOutput
+
 		// TODO add Traefik configuration
 
 		// Prometheus-related attributes
@@ -35,11 +40,9 @@ type (
 )
 
 func NewJaeger(ctx *pulumi.Context, name string, args *JaegerArgs, opts ...pulumi.ResourceOption) (*Jaeger, error) {
-	if args == nil {
-		args = &JaegerArgs{}
-	}
-
 	jgr := &Jaeger{}
+
+	args = jgr.defaults(args)
 	if err := ctx.RegisterComponentResource("ctfer-io:monitoring:jaeger", name, jgr, opts...); err != nil {
 		return nil, err
 	}
@@ -50,6 +53,31 @@ func NewJaeger(ctx *pulumi.Context, name string, args *JaegerArgs, opts ...pulum
 	jgr.outputs()
 
 	return jgr, nil
+}
+
+func (cm *Jaeger) defaults(args *JaegerArgs) *JaegerArgs {
+	if args == nil {
+		args = &JaegerArgs{}
+	}
+
+	args.registry = pulumi.String("").ToStringOutput()
+	if args.Registry != nil {
+		args.registry = args.Registry.ToStringPtrOutput().ApplyT(func(in *string) string {
+			// No private registry -> defaults to Docker Hub
+			if in == nil {
+				return ""
+			}
+
+			str := *in
+			// If one set, make sure it ends with one '/'
+			if str != "" && !strings.HasSuffix(str, "/") {
+				str = str + "/"
+			}
+			return str
+		}).(pulumi.StringOutput)
+	}
+
+	return args
 }
 
 func (jgr *Jaeger) provision(ctx *pulumi.Context, args *JaegerArgs, opts ...pulumi.ResourceOption) (err error) {
@@ -103,7 +131,7 @@ func (jgr *Jaeger) provision(ctx *pulumi.Context, args *JaegerArgs, opts ...pulu
 					Containers: corev1.ContainerArray{
 						corev1.ContainerArgs{
 							Name:  pulumi.String("jaeger"),
-							Image: pulumi.String("jaegertracing/all-in-one:1.60.0@sha256:4fd2d70fa347d6a47e79fcb06b1c177e6079f92cba88b083153d56263082135e"),
+							Image: pulumi.Sprintf("%sjaegertracing/all-in-one:1.60.0", args.registry),
 							Ports: corev1.ContainerPortArray{
 								corev1.ContainerPortArgs{
 									Name:          pulumi.String("ui"),

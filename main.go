@@ -12,6 +12,7 @@ func main() {
 
 		mon, err := services.NewMonitoring(ctx, "monitoring", &services.MonitoringArgs{
 			ColdExtract: cfg.GetBool("cold-extract"),
+			Registry:    pulumi.StringPtr(cfg.Get("registry")),
 		})
 		if err != nil {
 			return err

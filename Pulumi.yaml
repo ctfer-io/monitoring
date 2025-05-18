@@ -6,3 +6,7 @@ config:
     type: boolean
     description: 'If set to true, turns on OpenTelemetry cold extract in files. This will export the 3 signales PersistentVolumeClaims in which data is stored.'
     default: false
+  registry:
+    type: string
+    description: 'If set, images will be downloaded from the specified registry.'
+    default: ""

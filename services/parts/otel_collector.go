@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"strings"
 	"text/template"
 
 	"github.com/ctfer-io/monitoring/utils"
@@ -30,6 +31,9 @@ type (
 	OtelCollectorArgs struct {
 		Namespace pulumi.StringInput
 
+		Registry pulumi.StringPtrInput
+		registry pulumi.StringOutput
+
 		ColdExtract bool
 
 		JaegerURL     pulumi.StringInput
@@ -50,11 +54,9 @@ func init() {
 }
 
 func NewOtelCollector(ctx *pulumi.Context, name string, args *OtelCollectorArgs, opts ...pulumi.ResourceOption) (*OtelCollector, error) {
-	if args == nil {
-		args = &OtelCollectorArgs{}
-	}
-
 	otel := &OtelCollector{}
+
+	args = otel.defaults(args)
 	if err := ctx.RegisterComponentResource("ctfer-io:monitoring:otel-collector", name, otel, opts...); err != nil {
 		return nil, err
 	}
@@ -67,6 +69,31 @@ func NewOtelCollector(ctx *pulumi.Context, name string, args *OtelCollectorArgs,
 	}
 
 	return otel, nil
+}
+
+func (otel *OtelCollector) defaults(args *OtelCollectorArgs) *OtelCollectorArgs {
+	if args == nil {
+		args = &OtelCollectorArgs{}
+	}
+
+	args.registry = pulumi.String("").ToStringOutput()
+	if args.Registry != nil {
+		args.registry = args.Registry.ToStringPtrOutput().ApplyT(func(in *string) string {
+			// No private registry -> defaults to Docker Hub
+			if in == nil {
+				return ""
+			}
+
+			str := *in
+			// If one set, make sure it ends with one '/'
+			if str != "" && !strings.HasSuffix(str, "/") {
+				str = str + "/"
+			}
+			return str
+		}).(pulumi.StringOutput)
+	}
+
+	return args
 }
 
 func (otel *OtelCollector) provision(ctx *pulumi.Context, args *OtelCollectorArgs, opts ...pulumi.ResourceOption) (err error) {
@@ -184,7 +211,7 @@ func (otel *OtelCollector) provision(ctx *pulumi.Context, args *OtelCollectorArg
 					Containers: corev1.ContainerArray{
 						corev1.ContainerArgs{
 							Name:  pulumi.String("otel"),
-							Image: pulumi.String("otel/opentelemetry-collector-contrib:0.107.0@sha256:b65527791431d76d058b2813748a3f4a8912540d7b23beac2f6b4e02c872f5b7"),
+							Image: pulumi.Sprintf("%sotel/opentelemetry-collector-contrib:0.107.0", args.registry),
 							Args: pulumi.ToStringArray([]string{
 								"--config=/etc/otel-collector/config.yaml",
 							}),

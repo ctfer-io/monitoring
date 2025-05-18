@@ -1,6 +1,8 @@
 package parts
 
 import (
+	"strings"
+
 	"github.com/ctfer-io/monitoring/utils"
 	appsv1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/apps/v1"
 	corev1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/core/v1"
@@ -21,15 +23,16 @@ type (
 
 	PrometheusArgs struct {
 		Namespace pulumi.StringInput
+
+		Registry pulumi.StringPtrInput
+		registry pulumi.StringOutput
 	}
 )
 
 func NewPrometheus(ctx *pulumi.Context, name string, args *PrometheusArgs, opts ...pulumi.ResourceOption) (*Prometheus, error) {
-	if args == nil {
-		args = &PrometheusArgs{}
-	}
-
 	prom := &Prometheus{}
+
+	args = prom.defaults(args)
 	if err := ctx.RegisterComponentResource("ctfer-io:monitoring:prometheus", name, prom, opts...); err != nil {
 		return nil, err
 	}
@@ -42,6 +45,31 @@ func NewPrometheus(ctx *pulumi.Context, name string, args *PrometheusArgs, opts 
 	}
 
 	return prom, nil
+}
+
+func (otel *Prometheus) defaults(args *PrometheusArgs) *PrometheusArgs {
+	if args == nil {
+		args = &PrometheusArgs{}
+	}
+
+	args.registry = pulumi.String("").ToStringOutput()
+	if args.Registry != nil {
+		args.registry = args.Registry.ToStringPtrOutput().ApplyT(func(in *string) string {
+			// No private registry -> defaults to Docker Hub
+			if in == nil {
+				return ""
+			}
+
+			str := *in
+			// If one set, make sure it ends with one '/'
+			if str != "" && !strings.HasSuffix(str, "/") {
+				str = str + "/"
+			}
+			return str
+		}).(pulumi.StringOutput)
+	}
+
+	return args
 }
 
 func (prom *Prometheus) provision(ctx *pulumi.Context, args *PrometheusArgs, opts ...pulumi.ResourceOption) (err error) {
@@ -88,7 +116,7 @@ scrape_configs:
 					Containers: corev1.ContainerArray{
 						corev1.ContainerArgs{
 							Name:  pulumi.String("prometheus"),
-							Image: pulumi.String("prom/prometheus:v2.53.2@sha256:cafe963e591c872d38f3ea41ff8eb22cee97917b7c97b5c0ccd43a419f11f613"),
+							Image: pulumi.Sprintf("%sprom/prometheus:v2.53.2", args.registry),
 							Args: pulumi.ToStringArray([]string{
 								"--config.file=/etc/prometheus/config.yaml",
 								"--web.enable-remote-write-receiver", // Turn on remote write for OtelCollector exporter
