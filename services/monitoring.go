@@ -30,6 +30,7 @@ type (
 
 	MonitoringArgs struct {
 		ColdExtract bool
+		Registry    pulumi.StringPtrInput
 	}
 )
 
@@ -63,6 +64,7 @@ func (mon *Monitoring) provision(ctx *pulumi.Context, args *MonitoringArgs, opts
 	// Create subparts
 	mon.prom, err = parts.NewPrometheus(ctx, "prometheus", &parts.PrometheusArgs{
 		Namespace: mon.ns.Metadata.Name().Elem(),
+		Registry:  args.Registry,
 	}, opts...)
 	if err != nil {
 		return
@@ -71,6 +73,7 @@ func (mon *Monitoring) provision(ctx *pulumi.Context, args *MonitoringArgs, opts
 	mon.jaeger, err = parts.NewJaeger(ctx, "jaeger", &parts.JaegerArgs{
 		Namespace:     mon.ns.Metadata.Name().Elem(),
 		PrometheusURL: mon.prom.URL,
+		Registry:      args.Registry,
 	}, opts...)
 	if err != nil {
 		return
@@ -81,6 +84,7 @@ func (mon *Monitoring) provision(ctx *pulumi.Context, args *MonitoringArgs, opts
 		JaegerURL:     mon.jaeger.URL,
 		PrometheusURL: mon.prom.URL,
 		ColdExtract:   args.ColdExtract,
+		Registry:      args.Registry,
 	}, opts...)
 	if err != nil {
 		return
