@@ -195,16 +195,16 @@ scrape_configs:
 		Metadata: metav1.ObjectMetaArgs{
 			Namespace: args.Namespace,
 			Labels: pulumi.StringMap{
-				"app.kubernetes.io/component": pulumi.String("jaeger"),
+				"app.kubernetes.io/component": pulumi.String("prometheus"),
 				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
 				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
 			},
 		},
 		Spec: corev1.ServiceSpecArgs{
 			Selector: pulumi.StringMap{
-				"app.kubernetes.io/name":      pulumi.String("jaeger"),
+				"app.kubernetes.io/name":      pulumi.String("prometheus"),
 				"app.kubernetes.io/version":   pulumi.String(prometheusVersion),
-				"app.kubernetes.io/component": pulumi.String("jaeger"),
+				"app.kubernetes.io/component": pulumi.String("prometheus"),
 				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
 				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
 			},
@@ -223,7 +223,7 @@ scrape_configs:
 
 func (prom *Prometheus) outputs(ctx *pulumi.Context) error {
 	prom.URL = pulumi.Sprintf(
-		"%s:%d",
+		"http://%s:%d",
 		prom.svc.Metadata.Name().Elem(),
 		prom.svc.Spec.Ports().Index(pulumi.Int(0)).Port(),
 	)

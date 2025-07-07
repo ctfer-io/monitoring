@@ -21,7 +21,8 @@ type (
 		svcgrpc *corev1.Service
 
 		// URL to reach out the Jaeger UI
-		URL pulumi.StringOutput
+		URL       pulumi.StringOutput
+		PodLabels pulumi.StringMapOutput
 	}
 
 	JaegerArgs struct {
@@ -110,7 +111,7 @@ func (jgr *Jaeger) provision(ctx *pulumi.Context, args *JaegerArgs, opts ...pulu
 		)
 	}
 
-	jgr.dep, err = appsv1.NewDeployment(ctx, "jaeger-all-in-one", &appsv1.DeploymentArgs{
+	jgr.dep, err = appsv1.NewDeployment(ctx, "jaeger", &appsv1.DeploymentArgs{
 		Metadata: metav1.ObjectMetaArgs{
 			Namespace: args.Namespace,
 			Labels: pulumi.StringMap{
@@ -237,9 +238,10 @@ func (jgr *Jaeger) outputs(ctx *pulumi.Context) error {
 		jgr.svcgrpc.Metadata.Name().Elem(),
 		jgr.svcgrpc.Spec.Ports().Index(pulumi.Int(0)).Port(),
 	)
+	jgr.PodLabels = jgr.dep.Spec.Template().Metadata().Labels()
 
 	return ctx.RegisterResourceOutputs(jgr, pulumi.Map{
 		"url":       jgr.URL,
-		"podLabels": jgr.dep.Spec.Template().Metadata().Labels(),
+		"podLabels": jgr.PodLabels,
 	})
 }
