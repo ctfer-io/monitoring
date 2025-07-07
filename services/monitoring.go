@@ -29,18 +29,20 @@ type (
 	}
 
 	MonitoringArgs struct {
+		Registry         pulumi.StringInput
+		StorageClassName pulumi.StringInput
+		StorageSize      pulumi.StringInput
+		PVCAccessModes   pulumi.StringArrayInput
+
 		ColdExtract bool
-		Registry    pulumi.StringPtrInput
 	}
 )
 
 func NewMonitoring(ctx *pulumi.Context, name string, args *MonitoringArgs, opts ...pulumi.ResourceOption) (*Monitoring, error) {
-	if args == nil {
-		args = &MonitoringArgs{}
-	}
-
 	mon := &Monitoring{}
-	if err := ctx.RegisterComponentResource("ctfer-io:monitoring", name, mon, opts...); err != nil {
+
+	args = mon.defaults(args)
+	if err := ctx.RegisterComponentResource("ctfer-io:monitoring:monitoring", name, mon, opts...); err != nil {
 		return nil, err
 	}
 	opts = append(opts, pulumi.Parent(mon))
@@ -54,6 +56,14 @@ func NewMonitoring(ctx *pulumi.Context, name string, args *MonitoringArgs, opts 
 	return mon, nil
 }
 
+func (*Monitoring) defaults(args *MonitoringArgs) *MonitoringArgs {
+	if args == nil {
+		args = &MonitoringArgs{}
+	}
+
+	return args
+}
+
 func (mon *Monitoring) provision(ctx *pulumi.Context, args *MonitoringArgs, opts ...pulumi.ResourceOption) (err error) {
 	// Kubernetes namespace
 	mon.ns, err = corev1.NewNamespace(ctx, "monitoring", &corev1.NamespaceArgs{}, opts...)
@@ -61,7 +71,8 @@ func (mon *Monitoring) provision(ctx *pulumi.Context, args *MonitoringArgs, opts
 		return
 	}
 
-	// Create subparts
+	// Create parts of the component
+	// => Prometheus, at the root of every others
 	mon.prom, err = parts.NewPrometheus(ctx, "prometheus", &parts.PrometheusArgs{
 		Namespace: mon.ns.Metadata.Name().Elem(),
 		Registry:  args.Registry,
@@ -70,6 +81,7 @@ func (mon *Monitoring) provision(ctx *pulumi.Context, args *MonitoringArgs, opts
 		return
 	}
 
+	// => Jaeger to analyze the state of the system
 	mon.jaeger, err = parts.NewJaeger(ctx, "jaeger", &parts.JaegerArgs{
 		Namespace:     mon.ns.Metadata.Name().Elem(),
 		PrometheusURL: mon.prom.URL,
@@ -79,12 +91,16 @@ func (mon *Monitoring) provision(ctx *pulumi.Context, args *MonitoringArgs, opts
 		return
 	}
 
+	// => OpenTelemetry to collect all signals
 	mon.otel, err = parts.NewOtelCollector(ctx, "otel", &parts.OtelCollectorArgs{
-		Namespace:     mon.ns.Metadata.Name().Elem(),
-		JaegerURL:     mon.jaeger.URL,
-		PrometheusURL: mon.prom.URL,
-		ColdExtract:   args.ColdExtract,
-		Registry:      args.Registry,
+		Namespace:        mon.ns.Metadata.Name().Elem(),
+		JaegerURL:        mon.jaeger.URL,
+		PrometheusURL:    mon.prom.URL,
+		ColdExtract:      args.ColdExtract,
+		Registry:         args.Registry,
+		StorageClassName: args.StorageClassName,
+		StorageSize:      args.StorageSize,
+		PVCAccessModes:   args.PVCAccessModes,
 	}, opts...)
 	if err != nil {
 		return
