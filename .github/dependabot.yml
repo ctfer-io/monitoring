@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # GitHub Actions
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    assignees:
+      - 'pandatix'
+
+  # Go module
+  - package-ecosystem: 'gomod'
+    directories:
+      - '/'
+    schedule:
+      interval: 'weekly'
+    assignees:
+      - 'pandatix'
