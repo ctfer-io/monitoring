@@ -9,6 +9,7 @@ config:
   registry:
     type: string
     description: 'An optional OCI registry to download Docker images from.'
+    default: ''
   storage-class-name:
     type: string
     description: 'The StorageClassName for the PersistenVolumeClaim.'

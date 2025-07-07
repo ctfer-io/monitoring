@@ -72,7 +72,12 @@ func init() {
 	otelTemplate = tmpl
 }
 
-func NewOtelCollector(ctx *pulumi.Context, name string, args *OtelCollectorArgs, opts ...pulumi.ResourceOption) (*OtelCollector, error) {
+func NewOtelCollector(
+	ctx *pulumi.Context,
+	name string,
+	args *OtelCollectorArgs,
+	opts ...pulumi.ResourceOption,
+) (*OtelCollector, error) {
 	otel := &OtelCollector{}
 
 	args = otel.defaults(args)
@@ -200,7 +205,11 @@ func (*OtelCollector) check(args *OtelCollectorArgs) (merr error) {
 	return merr
 }
 
-func (otel *OtelCollector) provision(ctx *pulumi.Context, args *OtelCollectorArgs, opts ...pulumi.ResourceOption) (err error) {
+func (otel *OtelCollector) provision(
+	ctx *pulumi.Context,
+	args *OtelCollectorArgs,
+	opts ...pulumi.ResourceOption,
+) (err error) {
 	otel.cfg, err = corev1.NewConfigMap(ctx, "otel-config", &corev1.ConfigMapArgs{
 		Metadata: metav1.ObjectMetaArgs{
 			Namespace: args.Namespace,

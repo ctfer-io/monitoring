@@ -38,7 +38,12 @@ type (
 	}
 )
 
-func NewMonitoring(ctx *pulumi.Context, name string, args *MonitoringArgs, opts ...pulumi.ResourceOption) (*Monitoring, error) {
+func NewMonitoring(
+	ctx *pulumi.Context,
+	name string,
+	args *MonitoringArgs,
+	opts ...pulumi.ResourceOption,
+) (*Monitoring, error) {
 	mon := &Monitoring{}
 
 	args = mon.defaults(args)
@@ -64,7 +69,11 @@ func (*Monitoring) defaults(args *MonitoringArgs) *MonitoringArgs {
 	return args
 }
 
-func (mon *Monitoring) provision(ctx *pulumi.Context, args *MonitoringArgs, opts ...pulumi.ResourceOption) (err error) {
+func (mon *Monitoring) provision(
+	ctx *pulumi.Context,
+	args *MonitoringArgs,
+	opts ...pulumi.ResourceOption,
+) (err error) {
 	// Kubernetes namespace
 	mon.ns, err = corev1.NewNamespace(ctx, "monitoring", &corev1.NamespaceArgs{}, opts...)
 	if err != nil {

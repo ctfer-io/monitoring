@@ -33,7 +33,12 @@ const (
 	prometheusVersion = "v3.4.2"
 )
 
-func NewPrometheus(ctx *pulumi.Context, name string, args *PrometheusArgs, opts ...pulumi.ResourceOption) (*Prometheus, error) {
+func NewPrometheus(
+	ctx *pulumi.Context,
+	name string,
+	args *PrometheusArgs,
+	opts ...pulumi.ResourceOption,
+) (*Prometheus, error) {
 	prom := &Prometheus{}
 
 	args = prom.defaults(args)
@@ -77,7 +82,11 @@ func (*Prometheus) defaults(args *PrometheusArgs) *PrometheusArgs {
 	return args
 }
 
-func (prom *Prometheus) provision(ctx *pulumi.Context, args *PrometheusArgs, opts ...pulumi.ResourceOption) (err error) {
+func (prom *Prometheus) provision(
+	ctx *pulumi.Context,
+	args *PrometheusArgs,
+	opts ...pulumi.ResourceOption,
+) (err error) {
 	// ConfigMap
 	prom.cfg, err = corev1.NewConfigMap(ctx, "prometheus-conf", &corev1.ConfigMapArgs{
 		Immutable: pulumi.BoolPtr(true),
