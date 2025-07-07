@@ -8,7 +8,7 @@ config:
     default: false
   registry:
     type: string
-    description: 'An optional OCI registry to download romeo images from.'
+    description: 'An optional OCI registry to download Docker images from.'
   storage-class-name:
     type: string
     description: 'The StorageClassName for the PersistenVolumeClaim.'
