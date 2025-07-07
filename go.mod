@@ -5,7 +5,7 @@ go 1.23.2
 require (
 	github.com/pkg/errors v0.9.1
 	github.com/pulumi/pulumi-kubernetes/sdk/v4 v4.18.3
-	github.com/pulumi/pulumi/pkg/v3 v3.131.0
+	github.com/pulumi/pulumi/pkg/v3 v3.137.0
 	github.com/pulumi/pulumi/sdk/v3 v3.137.0
 	go.uber.org/multierr v1.11.0
 )
