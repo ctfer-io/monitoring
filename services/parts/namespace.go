@@ -46,6 +46,8 @@ type (
 	}
 )
 
+const podSecurityVersion = "latest"
+
 // NewNamespace creates a new [*Namespace].
 func NewNamespace(
 	ctx *pulumi.Context,
@@ -115,11 +117,11 @@ func (ns *Namespace) provision(
 			Labels: args.AdditionalLabels.ToStringMapOutput().ApplyT(func(labels map[string]string) map[string]string {
 				// Use the additional labels as a base, add/overwrite our own labels
 				labels["pod-security.kubernetes.io/audit"] = "restricted"
-				labels["pod-security.kubernetes.io/audit-version"] = "latest"
+				labels["pod-security.kubernetes.io/audit-version"] = podSecurityVersion
 				labels["pod-security.kubernetes.io/enforce"] = "baseline"
-				labels["pod-security.kubernetes.io/enforce-version"] = "latest"
+				labels["pod-security.kubernetes.io/enforce-version"] = podSecurityVersion
 				labels["pod-security.kubernetes.io/warn"] = "restricted"
-				labels["pod-security.kubernetes.io/warn-version"] = "latest"
+				labels["pod-security.kubernetes.io/warn-version"] = podSecurityVersion
 				return labels
 			}).(pulumi.StringMapOutput),
 		},

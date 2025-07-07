@@ -97,8 +97,8 @@ func run(c *cli.Context) error {
 	namespace := c.String("namespace")
 	podName := "extractor"
 
-	log().Info("Creating Pod",
-		zap.String("name", podName),
+	log().Info("creating Pod",
+		zap.String("pod", podName),
 		zap.String("namespace", namespace),
 	)
 
@@ -153,11 +153,17 @@ func run(c *cli.Context) error {
 	}
 
 	// Wait for it to be Up & Running
-	waitForPodReady(ctx, clientset, namespace, podName)
+	log().Info("waiting for the pod to be ready",
+		zap.String("pod", podName),
+		zap.String("namespace", namespace),
+	)
+	if err := waitForPodReady(ctx, clientset, namespace, podName); err != nil {
+		return err
+	}
 
 	// Copy files
 	out := c.String("directory")
-	log().Info("Copying files",
+	log().Info("copying files",
 		zap.String("directory", out),
 	)
 	if err := copyFromPod(ctx, config, clientset, namespace, podName, "copy", "/data", out); err != nil {
@@ -165,8 +171,8 @@ func run(c *cli.Context) error {
 	}
 
 	// Delete Pod
-	log().Info("Deleting pod",
-		zap.String("name", podName),
+	log().Info("deleting pod",
+		zap.String("pod", podName),
 		zap.String("namespace", namespace),
 	)
 	return clientset.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
@@ -185,8 +191,8 @@ func getClient() (*kubernetes.Clientset, *rest.Config, error) {
 	return clientset, config, nil
 }
 
-func waitForPodReady(ctx context.Context, clientset *kubernetes.Clientset, namespace, podName string) {
-	wait.PollUntilContextTimeout(ctx, 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+func waitForPodReady(ctx context.Context, clientset *kubernetes.Clientset, namespace, podName string) error {
+	return wait.PollUntilContextTimeout(ctx, 2*time.Second, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 		pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 		if err != nil {
 			return false, err
@@ -200,7 +206,12 @@ func waitForPodReady(ctx context.Context, clientset *kubernetes.Clientset, names
 	})
 }
 
-func copyFromPod(ctx context.Context, config *rest.Config, clientset *kubernetes.Clientset, namespace, podName, containerName, podPath, localDir string) error {
+func copyFromPod(
+	ctx context.Context,
+	config *rest.Config,
+	clientset *kubernetes.Clientset,
+	namespace, podName, containerName, podPath, localDir string,
+) error {
 	req := clientset.CoreV1().RESTClient().
 		Get().
 		Namespace(namespace).
