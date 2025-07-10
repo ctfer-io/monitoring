@@ -1,6 +1,6 @@
 name: monitoring
 runtime: go
-description: The Monitoring MicroService handles the deployment of software and technologies assets required by the CTFer.io Reference Architecture.
+description: The Monitoring component is in charge of the collection, process and storage of various signals (i.e. logs, metrics and distributed traces).
 config:
   cold-extract:
     type: boolean
@@ -8,5 +8,21 @@ config:
     default: false
   registry:
     type: string
-    description: 'If set, images will be downloaded from the specified registry.'
-    default: ""
+    description: 'An optional OCI registry to download Docker images from.'
+    default: ''
+  storage-class-name:
+    type: string
+    description: 'The StorageClassName for the PersistenVolumeClaim.'
+    default: 'standard'
+  storage-size:
+    type: string
+    description: 'The storage size.'
+    default: '50M'
+  pvc-access-mode:
+    type: string
+    description: 'The PVC access mode to use.'
+    default: 'ReadWriteMany'
+
+author: CTFer.io
+license: Apache-2.0
+website: https://github.com/ctfer-io/monitoring

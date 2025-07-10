@@ -3,7 +3,6 @@ package parts
 import (
 	"strings"
 
-	"github.com/ctfer-io/monitoring/utils"
 	appsv1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/apps/v1"
 	corev1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/core/v1"
 	metav1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/meta/v1"
@@ -22,21 +21,25 @@ type (
 		svcgrpc *corev1.Service
 
 		// URL to reach out the Jaeger UI
-		URL pulumi.StringOutput
+		URL       pulumi.StringOutput
+		PodLabels pulumi.StringMapOutput
 	}
 
 	JaegerArgs struct {
 		// Global attributes
 		Namespace pulumi.StringInput
 
-		Registry pulumi.StringPtrInput
+		Registry pulumi.StringInput
 		registry pulumi.StringOutput
 
-		// TODO add Traefik configuration
-
-		// Prometheus-related attributes
+		// Prometheus-related attributes.
+		// If no Prometheus URL is defined, the metrics dashboard
 		PrometheusURL pulumi.StringPtrInput
 	}
+)
+
+const (
+	jaegerVersion = "2.8.0"
 )
 
 func NewJaeger(ctx *pulumi.Context, name string, args *JaegerArgs, opts ...pulumi.ResourceOption) (*Jaeger, error) {
@@ -50,16 +53,19 @@ func NewJaeger(ctx *pulumi.Context, name string, args *JaegerArgs, opts ...pulum
 	if err := jgr.provision(ctx, args, opts...); err != nil {
 		return nil, err
 	}
-	jgr.outputs()
+	if err := jgr.outputs(ctx); err != nil {
+		return nil, err
+	}
 
 	return jgr, nil
 }
 
-func (cm *Jaeger) defaults(args *JaegerArgs) *JaegerArgs {
+func (*Jaeger) defaults(args *JaegerArgs) *JaegerArgs {
 	if args == nil {
 		args = &JaegerArgs{}
 	}
 
+	// Define private registry if any
 	args.registry = pulumi.String("").ToStringOutput()
 	if args.Registry != nil {
 		args.registry = args.Registry.ToStringPtrOutput().ApplyT(func(in *string) string {
@@ -81,16 +87,9 @@ func (cm *Jaeger) defaults(args *JaegerArgs) *JaegerArgs {
 }
 
 func (jgr *Jaeger) provision(ctx *pulumi.Context, args *JaegerArgs, opts ...pulumi.ResourceOption) (err error) {
-	hasPrometheus := args.PrometheusURL != nil
-
-	labels := pulumi.ToStringMap(map[string]string{
-		"category": "monitoring",
-		"app":      "jaeger",
-	})
-
 	// Deployment
 	depEnv := corev1.EnvVarArray{}
-	if hasPrometheus {
+	if args.PrometheusURL != nil {
 		depEnv = append(depEnv,
 			corev1.EnvVarArgs{
 				Name:  pulumi.String("METRICS_STORAGE_TYPE"),
@@ -112,26 +111,44 @@ func (jgr *Jaeger) provision(ctx *pulumi.Context, args *JaegerArgs, opts ...pulu
 		)
 	}
 
-	jgr.dep, err = appsv1.NewDeployment(ctx, "jaeger-all-in-one", &appsv1.DeploymentArgs{
+	jgr.dep, err = appsv1.NewDeployment(ctx, "jaeger", &appsv1.DeploymentArgs{
 		Metadata: metav1.ObjectMetaArgs{
 			Namespace: args.Namespace,
-			Labels:    labels,
+			Labels: pulumi.StringMap{
+				"app.kubernetes.io/name":      pulumi.String("jaeger"),
+				"app.kubernetes.io/version":   pulumi.String(otelVersion),
+				"app.kubernetes.io/component": pulumi.String("jaeger"),
+				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+			},
 		},
 		Spec: appsv1.DeploymentSpecArgs{
 			Selector: metav1.LabelSelectorArgs{
-				MatchLabels: labels,
+				MatchLabels: pulumi.StringMap{
+					"app.kubernetes.io/name":      pulumi.String("jaeger"),
+					"app.kubernetes.io/version":   pulumi.String(otelVersion),
+					"app.kubernetes.io/component": pulumi.String("jaeger"),
+					"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+					"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+				},
 			},
 			Replicas: pulumi.Int(1),
 			Template: corev1.PodTemplateSpecArgs{
 				Metadata: metav1.ObjectMetaArgs{
 					Namespace: args.Namespace,
-					Labels:    labels,
+					Labels: pulumi.StringMap{
+						"app.kubernetes.io/name":      pulumi.String("jaeger"),
+						"app.kubernetes.io/version":   pulumi.String(otelVersion),
+						"app.kubernetes.io/component": pulumi.String("jaeger"),
+						"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+						"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+					},
 				},
 				Spec: corev1.PodSpecArgs{
 					Containers: corev1.ContainerArray{
 						corev1.ContainerArgs{
 							Name:  pulumi.String("jaeger"),
-							Image: pulumi.Sprintf("%sjaegertracing/all-in-one:1.60.0", args.registry),
+							Image: pulumi.Sprintf("%sjaegertracing/jaeger:%s", args.registry, jaegerVersion),
 							Ports: corev1.ContainerPortArray{
 								corev1.ContainerPortArgs{
 									Name:          pulumi.String("ui"),
@@ -154,13 +171,22 @@ func (jgr *Jaeger) provision(ctx *pulumi.Context, args *JaegerArgs, opts ...pulu
 	}
 
 	// Services
+	// => One dedicated to the UI, will be port-forwarded if necessary
 	jgr.svcui, err = corev1.NewService(ctx, "jaeger-ui", &corev1.ServiceArgs{
 		Metadata: metav1.ObjectMetaArgs{
 			Namespace: args.Namespace,
-			Labels:    labels,
+			Labels: pulumi.StringMap{
+				"app.kubernetes.io/component": pulumi.String("jaeger"),
+				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+			},
 		},
 		Spec: corev1.ServiceSpecArgs{
-			Selector:  labels,
+			Selector: pulumi.StringMap{
+				"app.kubernetes.io/component": pulumi.String("jaeger"),
+				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+			},
 			ClusterIP: pulumi.String("None"), // Headless, for DNS purposes
 			Ports: corev1.ServicePortArray{
 				corev1.ServicePortArgs{
@@ -173,13 +199,23 @@ func (jgr *Jaeger) provision(ctx *pulumi.Context, args *JaegerArgs, opts ...pulu
 	if err != nil {
 		return
 	}
+
+	// => The grpc endpoint to send data to
 	jgr.svcgrpc, err = corev1.NewService(ctx, "jaeger-grpc", &corev1.ServiceArgs{
 		Metadata: metav1.ObjectMetaArgs{
 			Namespace: args.Namespace,
-			Labels:    labels,
+			Labels: pulumi.StringMap{
+				"app.kubernetes.io/component": pulumi.String("jaeger"),
+				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+			},
 		},
 		Spec: corev1.ServiceSpecArgs{
-			Selector:  labels,
+			Selector: pulumi.StringMap{
+				"app.kubernetes.io/component": pulumi.String("jaeger"),
+				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+			},
 			ClusterIP: pulumi.String("None"), // Headless, for DNS purposes
 			Ports: corev1.ServicePortArray{
 				corev1.ServicePortArgs{
@@ -196,9 +232,16 @@ func (jgr *Jaeger) provision(ctx *pulumi.Context, args *JaegerArgs, opts ...pulu
 	return
 }
 
-func (jgr *Jaeger) outputs() {
-	jgr.URL = utils.Headless(jgr.svcgrpc).ApplyT(func(hl string) string {
-		// TODO support HTTPS e.g. mTLS with Cilium ?
-		return "http://" + hl
-	}).(pulumi.StringOutput)
+func (jgr *Jaeger) outputs(ctx *pulumi.Context) error {
+	jgr.URL = pulumi.Sprintf(
+		"http://%s:%d",
+		jgr.svcgrpc.Metadata.Name().Elem(),
+		jgr.svcgrpc.Spec.Ports().Index(pulumi.Int(0)).Port(),
+	)
+	jgr.PodLabels = jgr.dep.Spec.Template().Metadata().Labels()
+
+	return ctx.RegisterResourceOutputs(jgr, pulumi.Map{
+		"url":       jgr.URL,
+		"podLabels": jgr.PodLabels,
+	})
 }

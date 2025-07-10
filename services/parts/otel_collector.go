@@ -4,14 +4,17 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"net/url"
 	"strings"
+	"sync"
 	"text/template"
 
-	"github.com/ctfer-io/monitoring/utils"
+	"github.com/pkg/errors"
 	appsv1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/apps/v1"
 	corev1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/core/v1"
 	metav1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/meta/v1"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+	"go.uber.org/multierr"
 )
 
 type (
@@ -21,24 +24,40 @@ type (
 		cfg        *corev1.ConfigMap
 		dep        *appsv1.Deployment
 		svcotel    *corev1.Service
-		svcprom    *corev1.Service
 		signalsPvc *corev1.PersistentVolumeClaim
 
 		Endpoint           pulumi.StringOutput
 		ColdExtractPVCName pulumi.StringPtrOutput
+		PodLabels          pulumi.StringMapOutput
 	}
 
 	OtelCollectorArgs struct {
 		Namespace pulumi.StringInput
 
-		Registry pulumi.StringPtrInput
+		Registry pulumi.StringInput
 		registry pulumi.StringOutput
+
+		StorageClassName pulumi.StringInput
+		storageClassName pulumi.StringOutput
+
+		StorageSize pulumi.StringInput
+		storageSize pulumi.StringOutput
+
+		PVCAccessModes pulumi.StringArrayInput
+		pvcAccessModes pulumi.StringArrayOutput
 
 		ColdExtract bool
 
 		JaegerURL     pulumi.StringInput
 		PrometheusURL pulumi.StringInput
 	}
+)
+
+const (
+	defaultStorageSize      = "50M"
+	defaultStorageClassName = "standard"
+
+	otelVersion = "0.129.1"
 )
 
 //go:embed otel-config.yaml.tmpl
@@ -53,10 +72,18 @@ func init() {
 	otelTemplate = tmpl
 }
 
-func NewOtelCollector(ctx *pulumi.Context, name string, args *OtelCollectorArgs, opts ...pulumi.ResourceOption) (*OtelCollector, error) {
+func NewOtelCollector(
+	ctx *pulumi.Context,
+	name string,
+	args *OtelCollectorArgs,
+	opts ...pulumi.ResourceOption,
+) (*OtelCollector, error) {
 	otel := &OtelCollector{}
 
 	args = otel.defaults(args)
+	if err := otel.check(args); err != nil {
+		return nil, err
+	}
 	if err := ctx.RegisterComponentResource("ctfer-io:monitoring:otel-collector", name, otel, opts...); err != nil {
 		return nil, err
 	}
@@ -71,11 +98,12 @@ func NewOtelCollector(ctx *pulumi.Context, name string, args *OtelCollectorArgs,
 	return otel, nil
 }
 
-func (otel *OtelCollector) defaults(args *OtelCollectorArgs) *OtelCollectorArgs {
+func (*OtelCollector) defaults(args *OtelCollectorArgs) *OtelCollectorArgs {
 	if args == nil {
 		args = &OtelCollectorArgs{}
 	}
 
+	// Define private registry if any
 	args.registry = pulumi.String("").ToStringOutput()
 	if args.Registry != nil {
 		args.registry = args.Registry.ToStringPtrOutput().ApplyT(func(in *string) string {
@@ -93,35 +121,118 @@ func (otel *OtelCollector) defaults(args *OtelCollectorArgs) *OtelCollectorArgs 
 		}).(pulumi.StringOutput)
 	}
 
+	// Don't default storage class name -> will select the default one
+	// on the K8s cluster.
+	args.storageClassName = pulumi.String(defaultStorageClassName).ToStringOutput()
+	if args.StorageClassName != nil {
+		args.storageClassName = args.StorageClassName.ToStringOutput().ApplyT(func(scm string) string {
+			if scm == "" {
+				return defaultStorageClassName
+			}
+			return scm
+		}).(pulumi.StringOutput)
+	}
+
+	// Default storage size to 50M
+	args.storageSize = pulumi.String(defaultStorageSize).ToStringOutput()
+	if args.StorageSize != nil {
+		args.storageSize = args.StorageSize.ToStringOutput().ApplyT(func(size string) string {
+			if size == "" {
+				return defaultStorageSize
+			}
+			return size
+		}).(pulumi.StringOutput)
+	}
+
+	// Default PVC access modes
+	if args.PVCAccessModes == nil {
+		args.pvcAccessModes = pulumi.ToStringArray([]string{
+			"ReadWriteMany",
+		}).ToStringArrayOutput()
+	} else {
+		args.pvcAccessModes = args.PVCAccessModes.ToStringArrayOutput().ApplyT(func(slc []string) []string {
+			if len(slc) == 0 {
+				return []string{"ReadWriteMany"}
+			}
+			return slc
+		}).(pulumi.StringArrayOutput)
+	}
+
 	return args
 }
 
-func (otel *OtelCollector) provision(ctx *pulumi.Context, args *OtelCollectorArgs, opts ...pulumi.ResourceOption) (err error) {
-	labels := pulumi.ToStringMap(map[string]string{
-		"category": "monitoring",
-		"app":      "otel-collector",
+func (*OtelCollector) check(args *OtelCollectorArgs) (merr error) {
+	// First-level checks
+	if args.JaegerURL == nil {
+		merr = multierr.Append(merr, errors.New("jaeger url is not provided"))
+	}
+	if args.PrometheusURL == nil {
+		merr = multierr.Append(merr, errors.New("prometheus url is not provided"))
+	}
+	if merr != nil {
+		return
+	}
+
+	// In-depth checks
+	wg := sync.WaitGroup{}
+	checks := 2 // number of checks to perform
+	wg.Add(checks)
+	cerr := make(chan error, checks)
+
+	args.JaegerURL.ToStringOutput().ApplyT(func(u string) error {
+		defer wg.Done()
+
+		if err := checkValidURL(u); err != nil {
+			cerr <- errors.Wrap(err, "invalid jaeger url")
+		}
+		return nil
+	})
+	args.PrometheusURL.ToStringOutput().ApplyT(func(u string) error {
+		defer wg.Done()
+
+		if err := checkValidURL(u); err != nil {
+			cerr <- errors.Wrap(err, "invalid prometheus url")
+		}
+		return nil
 	})
 
+	wg.Wait()
+	close(cerr)
+
+	for err := range cerr {
+		merr = multierr.Append(merr, err)
+	}
+	return merr
+}
+
+func (otel *OtelCollector) provision(
+	ctx *pulumi.Context,
+	args *OtelCollectorArgs,
+	opts ...pulumi.ResourceOption,
+) (err error) {
 	otel.cfg, err = corev1.NewConfigMap(ctx, "otel-config", &corev1.ConfigMapArgs{
-		Immutable: pulumi.Bool(true),
 		Metadata: metav1.ObjectMetaArgs{
 			Namespace: args.Namespace,
-			Labels:    labels,
+			Labels: pulumi.StringMap{
+				"app.kubernetes.io/component": pulumi.String("otel-collector"),
+				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+			},
 		},
 		Data: pulumi.StringMap{
-			"config": pulumi.All(args.JaegerURL, args.PrometheusURL).ApplyT(func(all []any) string {
+			"config": pulumi.All(args.JaegerURL, args.PrometheusURL).ApplyT(func(all []any) (string, error) {
 				buf := &bytes.Buffer{}
 				if err := otelTemplate.Execute(buf, map[string]any{
 					"JaegerURL":     all[0].(string),
 					"PrometheusURL": all[1].(string),
 					"ColdExtract":   args.ColdExtract,
 				}); err != nil {
-					panic(err)
+					return "", err
 				}
-				str := buf.String()
-				return str
+				return buf.String(), nil
 			}).(pulumi.StringOutput),
 		},
+		Immutable: pulumi.Bool(true),
 	}, opts...)
 	if err != nil {
 		return
@@ -132,18 +243,17 @@ func (otel *OtelCollector) provision(ctx *pulumi.Context, args *OtelCollectorArg
 			Metadata: metav1.ObjectMetaArgs{
 				Namespace: args.Namespace,
 				Labels: pulumi.StringMap{
-					"app.kubernetes.io/component": pulumi.String("otel"),
+					"app.kubernetes.io/component": pulumi.String("otel-collector"),
 					"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+					"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
 				},
 			},
 			Spec: corev1.PersistentVolumeClaimSpecArgs{
-				StorageClassName: pulumi.String("longhorn"),
-				AccessModes: pulumi.ToStringArray([]string{
-					"ReadWriteMany",
-				}),
+				StorageClassName: args.storageClassName,
+				AccessModes:      args.pvcAccessModes,
 				Resources: corev1.VolumeResourceRequirementsArgs{
 					Requests: pulumi.StringMap{
-						"storage": pulumi.String("5Gi"),
+						"storage": args.storageSize,
 					},
 				},
 			},
@@ -165,7 +275,7 @@ func (otel *OtelCollector) provision(ctx *pulumi.Context, args *OtelCollectorArg
 			Name: pulumi.String("config-volume"),
 			ConfigMap: corev1.ConfigMapVolumeSourceArgs{
 				Name:        otel.cfg.Metadata.Name(),
-				DefaultMode: pulumi.Int(0755),
+				DefaultMode: pulumi.Int(0644),
 				Items: corev1.KeyToPathArray{
 					corev1.KeyToPathArgs{
 						Key:  pulumi.String("config"),
@@ -195,23 +305,41 @@ func (otel *OtelCollector) provision(ctx *pulumi.Context, args *OtelCollectorArg
 	otel.dep, err = appsv1.NewDeployment(ctx, "otel", &appsv1.DeploymentArgs{
 		Metadata: metav1.ObjectMetaArgs{
 			Namespace: args.Namespace,
-			Labels:    labels,
+			Labels: pulumi.StringMap{
+				"app.kubernetes.io/name":      pulumi.String("otel-collector"),
+				"app.kubernetes.io/version":   pulumi.String(otelVersion),
+				"app.kubernetes.io/component": pulumi.String("otel-collector"),
+				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+			},
 		},
 		Spec: appsv1.DeploymentSpecArgs{
 			Replicas: pulumi.Int(1),
 			Selector: metav1.LabelSelectorArgs{
-				MatchLabels: labels,
+				MatchLabels: pulumi.StringMap{
+					"app.kubernetes.io/name":      pulumi.String("otel-collector"),
+					"app.kubernetes.io/version":   pulumi.String(otelVersion),
+					"app.kubernetes.io/component": pulumi.String("otel-collector"),
+					"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+					"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+				},
 			},
 			Template: corev1.PodTemplateSpecArgs{
 				Metadata: metav1.ObjectMetaArgs{
 					Namespace: args.Namespace,
-					Labels:    labels,
+					Labels: pulumi.StringMap{
+						"app.kubernetes.io/name":      pulumi.String("otel-collector"),
+						"app.kubernetes.io/version":   pulumi.String(otelVersion),
+						"app.kubernetes.io/component": pulumi.String("otel-collector"),
+						"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+						"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+					},
 				},
 				Spec: corev1.PodSpecArgs{
 					Containers: corev1.ContainerArray{
 						corev1.ContainerArgs{
 							Name:  pulumi.String("otel"),
-							Image: pulumi.Sprintf("%sotel/opentelemetry-collector-contrib:0.107.0", args.registry),
+							Image: pulumi.Sprintf("%sotel/opentelemetry-collector-contrib:%s", args.registry, otelVersion),
 							Args: pulumi.ToStringArray([]string{
 								"--config=/etc/otel-collector/config.yaml",
 							}),
@@ -219,10 +347,6 @@ func (otel *OtelCollector) provision(ctx *pulumi.Context, args *OtelCollectorArg
 								corev1.ContainerPortArgs{
 									Name:          pulumi.String("otlp-grpc"),
 									ContainerPort: pulumi.Int(4317),
-								},
-								corev1.ContainerPortArgs{
-									Name:          pulumi.String("metrics"),
-									ContainerPort: pulumi.Int(9090),
 								},
 							},
 							VolumeMounts: vmounts,
@@ -240,10 +364,20 @@ func (otel *OtelCollector) provision(ctx *pulumi.Context, args *OtelCollectorArg
 	otel.svcotel, err = corev1.NewService(ctx, "otlp-grpc", &corev1.ServiceArgs{
 		Metadata: metav1.ObjectMetaArgs{
 			Namespace: args.Namespace,
-			Labels:    labels,
+			Labels: pulumi.StringMap{
+				"app.kubernetes.io/component": pulumi.String("otel-collector"),
+				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+			},
 		},
 		Spec: corev1.ServiceSpecArgs{
-			Selector:  labels,
+			Selector: pulumi.StringMap{
+				"app.kubernetes.io/name":      pulumi.String("otel-collector"),
+				"app.kubernetes.io/version":   pulumi.String(otelVersion),
+				"app.kubernetes.io/component": pulumi.String("otel-collector"),
+				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+			},
 			ClusterIP: pulumi.String("None"), // Headless, for DNS purposes
 			Ports: corev1.ServicePortArray{
 				corev1.ServicePortArgs{
@@ -257,37 +391,29 @@ func (otel *OtelCollector) provision(ctx *pulumi.Context, args *OtelCollectorArg
 		return
 	}
 
-	otel.svcprom, err = corev1.NewService(ctx, "otlp-metrics", &corev1.ServiceArgs{
-		Metadata: metav1.ObjectMetaArgs{
-			Namespace: args.Namespace,
-			Labels:    labels,
-		},
-		Spec: corev1.ServiceSpecArgs{
-			Selector:  labels,
-			ClusterIP: pulumi.String("None"), // Headless, for DNS purposes
-			Ports: corev1.ServicePortArray{
-				corev1.ServicePortArgs{
-					Name: pulumi.String("metrics"),
-					Port: pulumi.Int(9090),
-				},
-			},
-		},
-	}, opts...)
-	if err != nil {
-		return
-	}
-
 	return
 }
 
 func (otel *OtelCollector) outputs(ctx *pulumi.Context, args *OtelCollectorArgs) error {
-	otel.Endpoint = utils.Headless(otel.svcotel)
+	otel.Endpoint = pulumi.Sprintf(
+		"%s.%s:%d",
+		otel.svcotel.Metadata.Name().Elem(),
+		otel.svcotel.Metadata.Namespace().Elem(),
+		otel.svcotel.Spec.Ports().Index(pulumi.Int(0)).Port(),
+	)
 	if args.ColdExtract {
 		otel.ColdExtractPVCName = otel.signalsPvc.Metadata.Name()
 	}
+	otel.PodLabels = otel.dep.Spec.Template().Metadata().Labels()
 
 	return ctx.RegisterResourceOutputs(otel, pulumi.Map{
 		"endpoint":           otel.Endpoint,
 		"coldExtractPVCName": otel.ColdExtractPVCName,
+		"podLabels":          otel.PodLabels,
 	})
+}
+
+func checkValidURL(u string) error {
+	_, err := url.Parse(u)
+	return err
 }

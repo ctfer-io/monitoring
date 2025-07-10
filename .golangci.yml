@@ -1,0 +1,38 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - errcheck
+    - goconst
+    - gosec
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - revive
+    - staticcheck
+    - unconvert
+    - unused
+  settings:
+    gosec:
+      excludes:
+        - G305 # File traversal -> the extractor is not trusted a manipulable tool in this context
+        - G110 # Zip bomb -> the extractor is not trusted a manipulable tool in this context
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

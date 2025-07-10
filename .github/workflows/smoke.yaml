@@ -1,0 +1,66 @@
+name: Smoke tests
+
+on:
+  workflow_call:
+
+jobs:
+  smoke-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: "go.mod"
+
+      - name: Write config file
+        run: |
+          cat <<EOF > kind-config.yaml
+          apiVersion: kind.x-k8s.io/v1alpha4
+          kind: Cluster
+          kubeadmConfigPatches:
+          - |
+            kind: ClusterConfiguration
+            apiServer:
+              extraArgs:
+                "service-node-port-range": "30000-30005"
+          nodes:
+          - role: control-plane
+            extraPortMappings:
+            - containerPort: 30000
+              hostPort: 30000
+            - containerPort: 30001
+              hostPort: 30001
+            - containerPort: 30002
+              hostPort: 30002
+            - containerPort: 30003
+              hostPort: 30003
+            - containerPort: 30004
+              hostPort: 30004
+            - containerPort: 30005
+              hostPort: 30005
+          EOF
+      - name: Set up Kind cluster
+        uses: helm/kind-action@a1b0e391336a6ee6713a0583f8c6240d70863de3 # v1.12.0
+        with:
+          config: kind-config.yaml
+          cluster_name: kind
+        env:
+          KIND_EXPERIMENTAL_DOCKER_NETWORK: kind
+
+      - name: Patch local-path to mount shared filesystem path on the single kind node
+        run: |
+          # From https://github.com/kubernetes-sigs/kind/issues/1487#issuecomment-2211072952
+          kubectl -n local-path-storage patch configmap local-path-config -p '{"data": {"config.json": "{\n\"sharedFileSystemPath\": \"/var/local-path-provisioner\"\n}"}}'
+
+      - name: Install Pulumi
+        uses: pulumi/actions@df5a93ad715135263c732ba288301bd044c383c0 # v6.3.0
+      - name: Prepare environment
+        run: |
+          pulumi login --local
+
+      - name: Run Smoke Tests
+        run: |
+          go test -v ./smoke/ -run=^Test_S_ -timeout=10m

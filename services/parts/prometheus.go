@@ -3,7 +3,6 @@ package parts
 import (
 	"strings"
 
-	"github.com/ctfer-io/monitoring/utils"
 	appsv1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/apps/v1"
 	corev1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/core/v1"
 	metav1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/meta/v1"
@@ -18,18 +17,28 @@ type (
 		dep *appsv1.Deployment
 		svc *corev1.Service
 
-		URL pulumi.StringOutput
+		URL       pulumi.StringOutput
+		PodLabels pulumi.StringMapOutput
 	}
 
 	PrometheusArgs struct {
 		Namespace pulumi.StringInput
 
-		Registry pulumi.StringPtrInput
+		Registry pulumi.StringInput
 		registry pulumi.StringOutput
 	}
 )
 
-func NewPrometheus(ctx *pulumi.Context, name string, args *PrometheusArgs, opts ...pulumi.ResourceOption) (*Prometheus, error) {
+const (
+	prometheusVersion = "v3.4.2"
+)
+
+func NewPrometheus(
+	ctx *pulumi.Context,
+	name string,
+	args *PrometheusArgs,
+	opts ...pulumi.ResourceOption,
+) (*Prometheus, error) {
 	prom := &Prometheus{}
 
 	args = prom.defaults(args)
@@ -47,11 +56,12 @@ func NewPrometheus(ctx *pulumi.Context, name string, args *PrometheusArgs, opts 
 	return prom, nil
 }
 
-func (otel *Prometheus) defaults(args *PrometheusArgs) *PrometheusArgs {
+func (*Prometheus) defaults(args *PrometheusArgs) *PrometheusArgs {
 	if args == nil {
 		args = &PrometheusArgs{}
 	}
 
+	// Define private registry if any
 	args.registry = pulumi.String("").ToStringOutput()
 	if args.Registry != nil {
 		args.registry = args.Registry.ToStringPtrOutput().ApplyT(func(in *string) string {
@@ -72,18 +82,21 @@ func (otel *Prometheus) defaults(args *PrometheusArgs) *PrometheusArgs {
 	return args
 }
 
-func (prom *Prometheus) provision(ctx *pulumi.Context, args *PrometheusArgs, opts ...pulumi.ResourceOption) (err error) {
-	labels := pulumi.ToStringMap(map[string]string{
-		"category": "monitoring",
-		"app":      "prometheus",
-	})
-
+func (prom *Prometheus) provision(
+	ctx *pulumi.Context,
+	args *PrometheusArgs,
+	opts ...pulumi.ResourceOption,
+) (err error) {
 	// ConfigMap
 	prom.cfg, err = corev1.NewConfigMap(ctx, "prometheus-conf", &corev1.ConfigMapArgs{
 		Immutable: pulumi.BoolPtr(true),
 		Metadata: metav1.ObjectMetaArgs{
 			Namespace: args.Namespace,
-			Labels:    labels,
+			Labels: pulumi.StringMap{
+				"app.kubernetes.io/component": pulumi.String("prometheus"),
+				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+			},
 		},
 		Data: pulumi.StringMap{
 			"config": pulumi.String(`
@@ -100,23 +113,41 @@ scrape_configs:
 	prom.dep, err = appsv1.NewDeployment(ctx, "prometheus", &appsv1.DeploymentArgs{
 		Metadata: metav1.ObjectMetaArgs{
 			Namespace: args.Namespace,
-			Labels:    labels,
+			Labels: pulumi.StringMap{
+				"app.kubernetes.io/name":      pulumi.String("prometheus"),
+				"app.kubernetes.io/version":   pulumi.String(prometheusVersion),
+				"app.kubernetes.io/component": pulumi.String("prometheus"),
+				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+			},
 		},
 		Spec: appsv1.DeploymentSpecArgs{
 			Selector: metav1.LabelSelectorArgs{
-				MatchLabels: labels,
+				MatchLabels: pulumi.StringMap{
+					"app.kubernetes.io/name":      pulumi.String("prometheus"),
+					"app.kubernetes.io/version":   pulumi.String(prometheusVersion),
+					"app.kubernetes.io/component": pulumi.String("prometheus"),
+					"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+					"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+				},
 			},
 			Replicas: pulumi.Int(1),
 			Template: corev1.PodTemplateSpecArgs{
 				Metadata: metav1.ObjectMetaArgs{
 					Namespace: args.Namespace,
-					Labels:    labels,
+					Labels: pulumi.StringMap{
+						"app.kubernetes.io/name":      pulumi.String("prometheus"),
+						"app.kubernetes.io/version":   pulumi.String(prometheusVersion),
+						"app.kubernetes.io/component": pulumi.String("prometheus"),
+						"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+						"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+					},
 				},
 				Spec: corev1.PodSpecArgs{
 					Containers: corev1.ContainerArray{
 						corev1.ContainerArgs{
 							Name:  pulumi.String("prometheus"),
-							Image: pulumi.Sprintf("%sprom/prometheus:v2.53.2", args.registry),
+							Image: pulumi.Sprintf("%sprom/prometheus:%s", args.registry, prometheusVersion),
 							Args: pulumi.ToStringArray([]string{
 								"--config.file=/etc/prometheus/config.yaml",
 								"--web.enable-remote-write-receiver", // Turn on remote write for OtelCollector exporter
@@ -141,7 +172,7 @@ scrape_configs:
 							Name: pulumi.String("config-volume"),
 							ConfigMap: corev1.ConfigMapVolumeSourceArgs{
 								Name:        prom.cfg.Metadata.Name(),
-								DefaultMode: pulumi.Int(0755),
+								DefaultMode: pulumi.Int(0644),
 								Items: corev1.KeyToPathArray{
 									corev1.KeyToPathArgs{
 										Key:  pulumi.String("config"),
@@ -163,10 +194,20 @@ scrape_configs:
 	prom.svc, err = corev1.NewService(ctx, "prometheus-metrics", &corev1.ServiceArgs{
 		Metadata: metav1.ObjectMetaArgs{
 			Namespace: args.Namespace,
-			Labels:    labels,
+			Labels: pulumi.StringMap{
+				"app.kubernetes.io/component": pulumi.String("prometheus"),
+				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+			},
 		},
 		Spec: corev1.ServiceSpecArgs{
-			Selector:  labels,
+			Selector: pulumi.StringMap{
+				"app.kubernetes.io/name":      pulumi.String("prometheus"),
+				"app.kubernetes.io/version":   pulumi.String(prometheusVersion),
+				"app.kubernetes.io/component": pulumi.String("prometheus"),
+				"app.kubernetes.io/part-of":   pulumi.String("monitoring"),
+				"ctfer.io/stack-name":         pulumi.String(ctx.Stack()),
+			},
 			ClusterIP: pulumi.String("None"), // Headless, for DNS purposes
 			Ports: corev1.ServicePortArray{
 				corev1.ServicePortArgs{
@@ -181,12 +222,15 @@ scrape_configs:
 }
 
 func (prom *Prometheus) outputs(ctx *pulumi.Context) error {
-	prom.URL = utils.Headless(prom.svc).ApplyT(func(hl string) string {
-		// TODO support HTTPS e.g. mTLS with Cilium ?
-		return "http://" + hl
-	}).(pulumi.StringOutput)
+	prom.URL = pulumi.Sprintf(
+		"http://%s:%d",
+		prom.svc.Metadata.Name().Elem(),
+		prom.svc.Spec.Ports().Index(pulumi.Int(0)).Port(),
+	)
+	prom.PodLabels = prom.dep.Spec.Template().Metadata().Labels()
 
 	return ctx.RegisterResourceOutputs(prom, pulumi.Map{
-		"url": prom.URL,
+		"url":       prom.URL,
+		"podLabels": prom.PodLabels,
 	})
 }
