@@ -39,7 +39,7 @@ type (
 )
 
 const (
-	jaegerAIOVersion = "2.8.0"
+	jaegerVersion = "2.8.0"
 )
 
 func NewJaeger(ctx *pulumi.Context, name string, args *JaegerArgs, opts ...pulumi.ResourceOption) (*Jaeger, error) {
@@ -148,7 +148,7 @@ func (jgr *Jaeger) provision(ctx *pulumi.Context, args *JaegerArgs, opts ...pulu
 					Containers: corev1.ContainerArray{
 						corev1.ContainerArgs{
 							Name:  pulumi.String("jaeger"),
-							Image: pulumi.Sprintf("%sjaegertracing/jaeger:%s", args.registry, jaegerAIOVersion),
+							Image: pulumi.Sprintf("%sjaegertracing/jaeger:%s", args.registry, jaegerVersion),
 							Ports: corev1.ContainerPortArray{
 								corev1.ContainerPortArgs{
 									Name:          pulumi.String("ui"),
