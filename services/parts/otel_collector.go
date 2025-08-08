@@ -38,7 +38,7 @@ type (
 		registry pulumi.StringOutput
 
 		StorageClassName pulumi.StringInput
-		storageClassName pulumi.StringOutput
+		storageClassName pulumi.StringPtrOutput
 
 		StorageSize pulumi.StringInput
 		storageSize pulumi.StringOutput
@@ -54,8 +54,7 @@ type (
 )
 
 const (
-	defaultStorageSize      = "50M"
-	defaultStorageClassName = "standard"
+	defaultStorageSize = "50M"
 
 	otelVersion = "0.129.1"
 )
@@ -123,14 +122,13 @@ func (*OtelCollector) defaults(args *OtelCollectorArgs) *OtelCollectorArgs {
 
 	// Don't default storage class name -> will select the default one
 	// on the K8s cluster.
-	args.storageClassName = pulumi.String(defaultStorageClassName).ToStringOutput()
 	if args.StorageClassName != nil {
-		args.storageClassName = args.StorageClassName.ToStringOutput().ApplyT(func(scm string) string {
-			if scm == "" {
-				return defaultStorageClassName
+		args.storageClassName = args.StorageClassName.ToStringOutput().ApplyT(func(scn string) *string {
+			if scn == "" {
+				return nil
 			}
-			return scm
-		}).(pulumi.StringOutput)
+			return &scn
+		}).(pulumi.StringPtrOutput)
 	}
 
 	// Default storage size to 50M
