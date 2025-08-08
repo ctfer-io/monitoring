@@ -13,7 +13,7 @@ config:
   storage-class-name:
     type: string
     description: 'The StorageClassName for the PersistenVolumeClaim.'
-    default: 'standard'
+    default: ''
   storage-size:
     type: string
     description: 'The storage size.'
