@@ -7,7 +7,7 @@ require (
 	github.com/pulumi/pulumi-kubernetes/sdk/v4 v4.23.0
 	github.com/pulumi/pulumi-random/sdk/v4 v4.18.4
 	github.com/pulumi/pulumi/pkg/v3 v3.201.0
-	github.com/pulumi/pulumi/sdk/v3 v3.202.0
+	github.com/pulumi/pulumi/sdk/v3 v3.203.0
 	github.com/urfave/cli/v2 v2.27.7
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.0
