@@ -41,6 +41,8 @@ jobs:
               hostPort: 30004
             - containerPort: 30005
               hostPort: 30005
+          networking:
+            disableDefaultCNI: true
           EOF
       - name: Set up Kind cluster
         uses: helm/kind-action@92086f6be054225fa813e0a4b13787fc9088faab # v1.13.0
@@ -54,6 +56,19 @@ jobs:
         run: |
           # From https://github.com/kubernetes-sigs/kind/issues/1487#issuecomment-2211072952
           kubectl -n local-path-storage patch configmap local-path-config -p '{"data": {"config.json": "{\n\"sharedFileSystemPath\": \"/var/local-path-provisioner\"\n}"}}'
+
+      - name: Setup Cilium as Kind CNI
+        run: |
+          # See https://docs.cilium.io/en/stable/installation/kind/#install-cilium
+          helm repo add cilium https://helm.cilium.io/
+
+          docker pull quay.io/cilium/cilium:v1.18.5
+          kind load docker-image quay.io/cilium/cilium:v1.18.5
+
+          helm install cilium cilium/cilium --version 1.18.5 \
+            --namespace kube-system \
+            --set image.pullPolicy=IfNotPresent \
+            --set ipam.mode=kubernetes
 
       - name: Install Pulumi
         uses: pulumi/actions@8582a9e8cc630786854029b4e09281acd6794b58 # v6.6.1
