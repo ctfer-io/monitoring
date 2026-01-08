@@ -31,7 +31,7 @@ type (
 
 		inotelntp *netwv1.NetworkPolicy
 		otelntp   *netwv1.NetworkPolicy
-		prsToApi  *yamlv2.ConfigGroup
+		prsToAPI  *yamlv2.ConfigGroup
 		jgrntp    *netwv1.NetworkPolicy
 		promntp   *netwv1.NetworkPolicy
 
@@ -51,18 +51,18 @@ type (
 		StorageSize      pulumi.StringInput
 		PVCAccessModes   pulumi.StringArrayInput
 
-		// NetpolApiServerTemplate is a Go text/template that defines the NetworkPolicy
+		// NetpolAPIServerTemplate is a Go text/template that defines the NetworkPolicy
 		// YAML schema to use.
 		// If none set, it is defaulted to a cilium.io/v2 CiliumNetworkPolicy.
-		NetpolApiServerTemplate   pulumi.StringPtrInput
-		netpolToApiServerTemplate pulumi.StringOutput
+		NetpolAPIServerTemplate   pulumi.StringPtrInput
+		netpolToAPIServerTemplate pulumi.StringOutput
 
 		ColdExtract bool
 	}
 )
 
 const (
-	defaultNetpolApiServerTemplate = `
+	defaultNetpolAPIServerTemplate = `
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -115,14 +115,15 @@ func (*Monitoring) defaults(args *MonitoringArgs) *MonitoringArgs {
 		args = &MonitoringArgs{}
 	}
 
-	args.netpolToApiServerTemplate = pulumi.String(defaultNetpolApiServerTemplate).ToStringOutput()
-	if args.NetpolApiServerTemplate != nil {
-		args.netpolToApiServerTemplate = args.NetpolApiServerTemplate.ToStringPtrOutput().ApplyT(func(persesToApiServerTemplate *string) string {
-			if persesToApiServerTemplate == nil || *persesToApiServerTemplate == "" {
-				return defaultNetpolApiServerTemplate
-			}
-			return *persesToApiServerTemplate
-		}).(pulumi.StringOutput)
+	args.netpolToAPIServerTemplate = pulumi.String(defaultNetpolAPIServerTemplate).ToStringOutput()
+	if args.NetpolAPIServerTemplate != nil {
+		args.netpolToAPIServerTemplate = args.NetpolAPIServerTemplate.ToStringPtrOutput().
+			ApplyT(func(persesToApiServerTemplate *string) string {
+				if persesToApiServerTemplate == nil || *persesToApiServerTemplate == "" {
+					return defaultNetpolAPIServerTemplate
+				}
+				return *persesToApiServerTemplate
+			}).(pulumi.StringOutput)
 	}
 
 	return args
@@ -135,7 +136,7 @@ func (mon *Monitoring) check(args *MonitoringArgs) error {
 	cerr := make(chan error, checks)
 
 	// Verify the template is syntactically valid.
-	args.netpolToApiServerTemplate.ApplyT(func(persesToApiServerTemplate string) error {
+	args.netpolToAPIServerTemplate.ApplyT(func(persesToApiServerTemplate string) error {
 		defer wg.Done()
 
 		_, err := template.New("perses-to-apiserver").
@@ -315,26 +316,27 @@ func (mon *Monitoring) provision(
 	}
 
 	// => NetworkPolicy from Perses to apiserver through endpoint in default namespace.
-	mon.prsToApi, err = yamlv2.NewConfigGroup(ctx, "perses-to-apiserver-netpol", &yamlv2.ConfigGroupArgs{
-		Yaml: pulumi.All(args.netpolToApiServerTemplate, mon.ns.Name, mon.perses.PodLabels).ApplyT(func(all []any) (string, error) {
-			persesToApiServerTemplate := all[0].(string)
-			namespace := all[1].(string)
-			podLabels := all[2].(map[string]string)
+	mon.prsToAPI, err = yamlv2.NewConfigGroup(ctx, "perses-to-apiserver-netpol", &yamlv2.ConfigGroupArgs{
+		Yaml: pulumi.All(args.netpolToAPIServerTemplate, mon.ns.Name, mon.perses.PodLabels).
+			ApplyT(func(all []any) (string, error) {
+				persesToAPIServerTemplate := all[0].(string)
+				namespace := all[1].(string)
+				podLabels := all[2].(map[string]string)
 
-			tmpl, _ := template.New("perses-to-apiserver").
-				Funcs(sprig.FuncMap()).
-				Parse(persesToApiServerTemplate)
+				tmpl, _ := template.New("perses-to-apiserver").
+					Funcs(sprig.FuncMap()).
+					Parse(persesToAPIServerTemplate)
 
-			buf := &bytes.Buffer{}
-			if err := tmpl.Execute(buf, map[string]any{
-				"Name":      "allow-perses-to-apiserver-" + ctx.Stack(),
-				"Namespace": namespace,
-				"PodLabels": podLabels,
-			}); err != nil {
-				return "", err
-			}
-			return buf.String(), nil
-		}).(pulumi.StringOutput),
+				buf := &bytes.Buffer{}
+				if err := tmpl.Execute(buf, map[string]any{
+					"Name":      "allow-perses-to-apiserver-" + ctx.Stack(),
+					"Namespace": namespace,
+					"PodLabels": podLabels,
+				}); err != nil {
+					return "", err
+				}
+				return buf.String(), nil
+			}).(pulumi.StringOutput),
 	}, opts...)
 	if err != nil {
 		return

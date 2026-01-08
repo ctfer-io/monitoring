@@ -48,7 +48,7 @@ const (
 )
 
 //go:embed jaeger-ui.json
-var jaegerUi string
+var jaegerUI string
 
 //go:embed jaeger-config.yaml.tmpl
 var jaegerConfig string
@@ -161,7 +161,7 @@ func (jgr *Jaeger) provision(ctx *pulumi.Context, args *JaegerArgs, opts ...pulu
 			Namespace: args.Namespace,
 		},
 		Data: pulumi.StringMap{
-			"jaeger-ui.json": pulumi.String(jaegerUi),
+			"jaeger-ui.json": pulumi.String(jaegerUI),
 			"config.yaml": args.PrometheusURL.ToStringOutput().ApplyT(func(prometheusUrl string) (string, error) {
 				buf := &bytes.Buffer{}
 				if err := jaegerTemplate.Execute(buf, map[string]any{

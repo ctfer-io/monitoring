@@ -134,7 +134,8 @@ func (prs *Perses) provision(ctx *pulumi.Context, args *PersesArgs, opts ...pulu
 			},
 			"config": pulumi.Map{
 				"provisioning": pulumi.Map{
-					"interval": pulumi.String("1m"), // During bootstrap we intensively deploy things, so we need something quite faster than default 10m
+					// During bootstrap we intensively deploy things, so we need faster than default 10m
+					"interval": pulumi.String("1m"),
 				},
 			},
 		},
