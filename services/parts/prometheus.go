@@ -30,7 +30,7 @@ type (
 )
 
 const (
-	prometheusVersion = "v3.4.2"
+	prometheusVersion = "v3.9.1"
 )
 
 func NewPrometheus(

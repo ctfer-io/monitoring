@@ -27,6 +27,7 @@ The Monitoring service's architecture currently provides:
 - [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/)
 - [Jaeger UI](https://www.jaegertracing.io/)
 - [Prometheus](https://prometheus.io/)
+- [Perses](https://perses.dev/)
 
 The multiple parts passes information in a non-cyclic way to avoid deadlocks (DAG or dependencies), as summarized in the following diagram.
 
@@ -56,6 +57,5 @@ For research and/or development purposes, the architecture provide way to perfor
 
 ## TODO list
 
-- Add Grafana (require Prometheus)
 - Add AlertManager (require Prometheus)
-- Think of Dashboard as Code, and if it is relevant to extract them (so technically how ? With Docker manifests inspection ? Service discovery and custom protocol ?) automatically ?
+- Add ElasticSearch/OpenSearch for logs and/or storage backend for traces

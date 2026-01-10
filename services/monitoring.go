@@ -1,14 +1,20 @@
 package services
 
 import (
+	"bytes"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
+	"text/template"
 
+	"github.com/Masterminds/sprig/v3"
 	"github.com/pkg/errors"
 	metav1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/meta/v1"
 	netwv1 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/networking/v1"
+	yamlv2 "github.com/pulumi/pulumi-kubernetes/sdk/v4/go/kubernetes/yaml/v2"
 	"github.com/pulumi/pulumi/sdk/v3/go/pulumi"
+	"go.uber.org/multierr"
 
 	"github.com/ctfer-io/monitoring/services/parts"
 )
@@ -19,11 +25,13 @@ type (
 
 		ns     *parts.Namespace
 		otel   *parts.OtelCollector
+		perses *parts.Perses
 		jaeger *parts.Jaeger
 		prom   *parts.Prometheus
 
 		inotelntp *netwv1.NetworkPolicy
 		otelntp   *netwv1.NetworkPolicy
+		prsToAPI  *yamlv2.ConfigGroup
 		jgrntp    *netwv1.NetworkPolicy
 		promntp   *netwv1.NetworkPolicy
 
@@ -43,8 +51,37 @@ type (
 		StorageSize      pulumi.StringInput
 		PVCAccessModes   pulumi.StringArrayInput
 
+		// NetpolAPIServerTemplate is a Go text/template that defines the NetworkPolicy
+		// YAML schema to use.
+		// If none set, it is defaulted to a cilium.io/v2 CiliumNetworkPolicy.
+		NetpolAPIServerTemplate   pulumi.StringPtrInput
+		netpolToAPIServerTemplate pulumi.StringOutput
+
 		ColdExtract bool
 	}
+)
+
+const (
+	defaultNetpolAPIServerTemplate = `
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ .Name }}
+  namespace: {{ .Namespace }}
+spec:
+  endpointSelector:
+    matchLabels:
+    {{- range $k, $v := .PodLabels }}
+      {{ $k }}: {{ $v }}
+    {{- end }}
+  egress:
+  - toEntities:
+    - kube-apiserver
+  - toPorts:
+    - ports:
+      - port: "6443"
+        protocol: TCP
+`
 )
 
 func NewMonitoring(
@@ -56,6 +93,9 @@ func NewMonitoring(
 	mon := &Monitoring{}
 
 	args = mon.defaults(args)
+	if err := mon.check(args); err != nil {
+		return nil, err
+	}
 	if err := ctx.RegisterComponentResource("ctfer-io:monitoring:monitoring", name, mon, opts...); err != nil {
 		return nil, err
 	}
@@ -75,7 +115,45 @@ func (*Monitoring) defaults(args *MonitoringArgs) *MonitoringArgs {
 		args = &MonitoringArgs{}
 	}
 
+	args.netpolToAPIServerTemplate = pulumi.String(defaultNetpolAPIServerTemplate).ToStringOutput()
+	if args.NetpolAPIServerTemplate != nil {
+		args.netpolToAPIServerTemplate = args.NetpolAPIServerTemplate.ToStringPtrOutput().
+			ApplyT(func(persesToApiServerTemplate *string) string {
+				if persesToApiServerTemplate == nil || *persesToApiServerTemplate == "" {
+					return defaultNetpolAPIServerTemplate
+				}
+				return *persesToApiServerTemplate
+			}).(pulumi.StringOutput)
+	}
+
 	return args
+}
+
+func (mon *Monitoring) check(args *MonitoringArgs) error {
+	wg := &sync.WaitGroup{}
+	checks := 1 // number of checks to perform
+	wg.Add(checks)
+	cerr := make(chan error, checks)
+
+	// Verify the template is syntactically valid.
+	args.netpolToAPIServerTemplate.ApplyT(func(persesToApiServerTemplate string) error {
+		defer wg.Done()
+
+		_, err := template.New("perses-to-apiserver").
+			Funcs(sprig.FuncMap()).
+			Parse(persesToApiServerTemplate)
+		cerr <- err
+		return nil
+	})
+
+	wg.Wait()
+	close(cerr)
+
+	var merr error
+	for err := range cerr {
+		merr = multierr.Append(merr, err)
+	}
+	return merr
 }
 
 func (mon *Monitoring) provision(
@@ -100,6 +178,16 @@ func (mon *Monitoring) provision(
 	mon.prom, err = parts.NewPrometheus(ctx, "prometheus", &parts.PrometheusArgs{
 		Namespace: mon.ns.Name,
 		Registry:  args.Registry,
+	}, opts...)
+	if err != nil {
+		return
+	}
+
+	// => Perse for dashboards
+	mon.perses, err = parts.NewPerses(ctx, "perses", &parts.PersesArgs{
+		Namespace:     mon.ns.Name,
+		Registry:      args.Registry,
+		PrometheusURL: mon.prom.URL,
 	}, opts...)
 	if err != nil {
 		return
@@ -227,6 +315,33 @@ func (mon *Monitoring) provision(
 		return
 	}
 
+	// => NetworkPolicy from Perses to apiserver through endpoint in default namespace.
+	mon.prsToAPI, err = yamlv2.NewConfigGroup(ctx, "perses-to-apiserver-netpol", &yamlv2.ConfigGroupArgs{
+		Yaml: pulumi.All(args.netpolToAPIServerTemplate, mon.ns.Name, mon.perses.PodLabels).
+			ApplyT(func(all []any) (string, error) {
+				persesToAPIServerTemplate := all[0].(string)
+				namespace := all[1].(string)
+				podLabels := all[2].(map[string]string)
+
+				tmpl, _ := template.New("perses-to-apiserver").
+					Funcs(sprig.FuncMap()).
+					Parse(persesToAPIServerTemplate)
+
+				buf := &bytes.Buffer{}
+				if err := tmpl.Execute(buf, map[string]any{
+					"Name":      "allow-perses-to-apiserver-" + ctx.Stack(),
+					"Namespace": namespace,
+					"PodLabels": podLabels,
+				}); err != nil {
+					return "", err
+				}
+				return buf.String(), nil
+			}).(pulumi.StringOutput),
+	}, opts...)
+	if err != nil {
+		return
+	}
+
 	// Allow Jaeger to receive data from OTEL Collector and read data from Prometheus.
 	mon.jgrntp, err = netwv1.NewNetworkPolicy(ctx, "jaeger-ntp", &netwv1.NetworkPolicyArgs{
 		Metadata: metav1.ObjectMetaArgs{
@@ -342,6 +457,26 @@ func (mon *Monitoring) provision(
 							},
 							PodSelector: metav1.LabelSelectorArgs{
 								MatchLabels: mon.jaeger.PodLabels,
+							},
+						},
+					},
+					Ports: netwv1.NetworkPolicyPortArray{
+						netwv1.NetworkPolicyPortArgs{
+							Port: parseURLPort(mon.prom.URL),
+						},
+					},
+				},
+				// Perses -> Prometheus
+				netwv1.NetworkPolicyIngressRuleArgs{
+					From: netwv1.NetworkPolicyPeerArray{
+						netwv1.NetworkPolicyPeerArgs{
+							NamespaceSelector: metav1.LabelSelectorArgs{
+								MatchLabels: pulumi.StringMap{
+									"kubernetes.io/metadata.name": mon.ns.Name,
+								},
+							},
+							PodSelector: metav1.LabelSelectorArgs{
+								MatchLabels: mon.perses.PodLabels,
 							},
 						},
 					},

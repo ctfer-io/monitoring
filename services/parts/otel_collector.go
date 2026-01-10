@@ -56,7 +56,7 @@ type (
 const (
 	defaultStorageSize = "50M"
 
-	otelVersion = "0.129.1"
+	otelVersion = "0.143.0"
 )
 
 //go:embed otel-config.yaml.tmpl
