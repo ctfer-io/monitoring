@@ -245,12 +245,13 @@ func untar(r io.Reader, dest string) error {
 	return nil
 }
 
-func sanitizeArchivePath(d, t string) (v string, err error) {
-	v = filepath.Join(d, t)
-	if strings.HasPrefix(v, filepath.Clean(d)) {
-		return v, nil
+// Based upon https://security.snyk.io/research/zip-slip-vulnerability#expandable-socPI9fFAJ-title
+func sanitizeArchivePath(destination, filePath string) (destpath string, err error) {
+	destpath = filepath.Join(destination, filePath)
+	if !strings.HasPrefix(destpath, filepath.Clean(destination)+string(os.PathSeparator)) {
+		return destpath, fmt.Errorf("filepath is tainted: %s", destination)
 	}
-	return "", fmt.Errorf("filepath is tainted: %s", t)
+	return
 }
 
 func ptr[T any](t T) *T {
