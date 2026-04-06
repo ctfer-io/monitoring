@@ -1,6 +1,6 @@
 module github.com/ctfer-io/monitoring
 
-go 1.25.6
+go 1.25.8
 
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
@@ -8,7 +8,7 @@ require (
 	github.com/pulumi/pulumi-kubernetes/sdk/v4 v4.28.0
 	github.com/pulumi/pulumi-random/sdk/v4 v4.19.1
 	github.com/pulumi/pulumi/pkg/v3 v3.227.0
-	github.com/pulumi/pulumi/sdk/v3 v3.227.0
+	github.com/pulumi/pulumi/sdk/v3 v3.229.0
 	github.com/urfave/cli/v3 v3.7.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.1
