@@ -1,6 +1,6 @@
 module github.com/ctfer-io/monitoring
 
-go 1.25.6
+go 1.25.8
 
 require (
 	github.com/Masterminds/sprig/v3 v3.3.0
@@ -8,7 +8,7 @@ require (
 	github.com/pulumi/pulumi-kubernetes/sdk/v4 v4.28.0
 	github.com/pulumi/pulumi-random/sdk/v4 v4.19.1
 	github.com/pulumi/pulumi/pkg/v3 v3.227.0
-	github.com/pulumi/pulumi/sdk/v3 v3.227.0
+	github.com/pulumi/pulumi/sdk/v3 v3.230.0
 	github.com/urfave/cli/v3 v3.7.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.27.1
@@ -84,12 +84,12 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
 	github.com/git-pkgs/manifests v0.4.1 // indirect
-	github.com/git-pkgs/packageurl-go v0.2.1 // indirect
-	github.com/git-pkgs/purl v0.1.8 // indirect
-	github.com/git-pkgs/vers v0.2.2 // indirect
+	github.com/git-pkgs/packageurl-go v0.3.1 // indirect
+	github.com/git-pkgs/purl v0.1.10 // indirect
+	github.com/git-pkgs/vers v0.2.4 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
-	github.com/go-git/go-billy/v5 v5.6.2 // indirect
-	github.com/go-git/go-git/v5 v5.16.5 // indirect
+	github.com/go-git/go-billy/v5 v5.8.0 // indirect
+	github.com/go-git/go-git/v5 v5.17.2 // indirect
 	github.com/go-jose/go-jose/v3 v3.0.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -224,7 +224,7 @@ require (
 	google.golang.org/genproto v0.0.0-20240311173647-c811ad7063a7 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260316180232-0b37fe3546d5 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260316180232-0b37fe3546d5 // indirect
-	google.golang.org/grpc v1.79.3 // indirect
+	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
